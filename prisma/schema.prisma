@@ -54,6 +54,7 @@ enum MensajeOrigen {
 
 model Reclamo {
   id            String           @id @default(uuid())
+  codigoSeguimiento String       @unique @map("codigo_seguimiento")
   correlationId String           @unique @map("correlation_id")
   contactKey    String           @map("contact_key")
   canal         Canal

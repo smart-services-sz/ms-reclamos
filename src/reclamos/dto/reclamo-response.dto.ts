@@ -6,6 +6,9 @@ export class ReclamoResponseDto {
   /** ID único del reclamo en la base de datos (UUID) */
   id!: string;
 
+  /** Codigo alfanumerico unico para seguimiento por parte del usuario */
+  codigoSeguimiento!: string;
+
   /** ID de correlación end-to-end */
   correlationId!: string;
 
