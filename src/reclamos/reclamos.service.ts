@@ -1,8 +1,31 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, Reclamo } from '@prisma/client';
 import { CreateReclamoDto } from './dto/create-reclamo.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReclamoResponseDto } from './dto/reclamo-response.dto';
+import { FindReclamosDto } from './dto/find-reclamos.dto';
+import { UpdateReclamoDto } from './dto/update-reclamo.dto';
+
+type ReclamoCrudResponse = ReclamoResponseDto & {
+  message: string;
+  reclamoId: string;
+  trackingCode: string;
+  status: string;
+  createdAt: string;
+  data: object;
+};
+
+type PaginatedReclamosResponse = {
+  items: ReclamoCrudResponse[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalItems: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+};
 
 @Injectable()
 export class ReclamosService {
@@ -13,7 +36,7 @@ export class ReclamosService {
 
   // Persiste el reclamo y su historial de mensajes en PostgreSQL dentro de una
   // única transacción atómica. Si falla cualquier INSERT, Prisma hace rollback automático.
-  async create(payload: CreateReclamoDto): Promise<ReclamoResponseDto & { message: string; reclamoId: string; trackingCode: string; status: string; createdAt: string; data: object }> {
+  async create(payload: CreateReclamoDto): Promise<ReclamoCrudResponse> {
     this.logger.log(
       `[${payload.correlationId}] Persistiendo reclamo | contactKey=${payload.contactKey} | categoria=${payload.categoria} | prioridad=${payload.prioridad}`,
     );
@@ -37,24 +60,7 @@ export class ReclamosService {
     );
 
     return {
-      id: reclamo.id,
-      codigoSeguimiento: reclamo.codigoSeguimiento,
-      correlationId: reclamo.correlationId,
-      contactKey: reclamo.contactKey,
-      canal: reclamo.canal as any,
-      correo: reclamo.correo,
-      dni: reclamo.dni,
-      problema: reclamo.problema,
-      direccion: reclamo.direccion,
-      lat: reclamo.lat,
-      lng: reclamo.lng,
-      categoria: reclamo.categoria as any,
-      prioridad: reclamo.prioridad as any,
-      estado: reclamo.estado as any,
-      observaciones: reclamo.observaciones,
-      creadoEn: reclamo.creadoEn,
-      actualizadoEn: reclamo.actualizadoEn,
-      resolvedAt: reclamo.resolvedAt,
+      ...this.toResponse(reclamo),
       message: `Tu reclamo fue creado correctamente. Codigo de seguimiento: ${reclamo.codigoSeguimiento}`,
       reclamoId: reclamo.id,
       trackingCode: reclamo.codigoSeguimiento,
@@ -68,6 +74,149 @@ export class ReclamosService {
         categoria: reclamo.categoria,
         prioridad: reclamo.prioridad,
       },
+    };
+  }
+
+  async findAll(payload: FindReclamosDto): Promise<PaginatedReclamosResponse> {
+    const where: Prisma.ReclamoWhereInput = {
+      contactKey: payload.contactKey || undefined,
+      codigoSeguimiento: payload.codigoSeguimiento || undefined,
+      estado: payload.estado || undefined,
+      categoria: payload.categoria || undefined,
+      prioridad: payload.prioridad || undefined,
+    };
+
+    const [items, totalItems] = await this.prisma.$transaction([
+      this.prisma.reclamo.findMany({
+        where,
+        skip: payload.skip,
+        take: payload.limit,
+        orderBy: {
+          creadoEn: payload.sortDirection === 1 ? 'asc' : 'desc',
+        },
+      }),
+      this.prisma.reclamo.count({ where }),
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(totalItems / payload.limit));
+
+    return {
+      items: items.map((item) => ({
+        ...this.toResponse(item),
+        message: 'Reclamo obtenido correctamente',
+        reclamoId: item.id,
+        trackingCode: item.codigoSeguimiento,
+        status: 'ok',
+        createdAt: item.creadoEn.toISOString(),
+        data: {
+          problema: item.problema,
+          direccion: item.direccion,
+          lat: item.lat,
+          lng: item.lng,
+          categoria: item.categoria,
+          prioridad: item.prioridad,
+        },
+      })),
+      pagination: {
+        page: payload.page,
+        limit: payload.limit,
+        totalItems,
+        totalPages,
+        hasNextPage: payload.page < totalPages,
+        hasPreviousPage: payload.page > 1,
+      },
+    };
+  }
+
+  async findOne(id: string): Promise<ReclamoCrudResponse> {
+    const reclamo = await this.prisma.reclamo.findUnique({
+      where: { id },
+    });
+
+    if (!reclamo) {
+      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
+    }
+
+    return {
+      ...this.toResponse(reclamo),
+      message: 'Reclamo obtenido correctamente',
+      reclamoId: reclamo.id,
+      trackingCode: reclamo.codigoSeguimiento,
+      status: 'ok',
+      createdAt: reclamo.creadoEn.toISOString(),
+      data: {
+        problema: reclamo.problema,
+        direccion: reclamo.direccion,
+        lat: reclamo.lat,
+        lng: reclamo.lng,
+        categoria: reclamo.categoria,
+        prioridad: reclamo.prioridad,
+      },
+    };
+  }
+
+  async update(id: string, data: UpdateReclamoDto): Promise<ReclamoCrudResponse> {
+    const existing = await this.prisma.reclamo.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
+    }
+
+    let resolvedAt: Date | null | undefined;
+    if (data.estado === 'resuelto') {
+      resolvedAt = new Date();
+    } else if (data.estado !== undefined) {
+      resolvedAt = null;
+    }
+
+    const reclamo = await this.prisma.reclamo.update({
+      where: { id },
+      data: {
+        problema: data.problema,
+        direccion: data.direccion,
+        lat: data.lat,
+        lng: data.lng,
+        categoria: data.categoria,
+        prioridad: data.prioridad,
+        estado: data.estado,
+        observaciones: data.observaciones,
+        metadata: data.metadata as Prisma.InputJsonValue | undefined,
+        resolvedAt,
+      },
+    });
+
+    return {
+      ...this.toResponse(reclamo),
+      message: 'Reclamo actualizado correctamente',
+      reclamoId: reclamo.id,
+      trackingCode: reclamo.codigoSeguimiento,
+      status: 'updated',
+      createdAt: reclamo.creadoEn.toISOString(),
+      data: {
+        problema: reclamo.problema,
+        direccion: reclamo.direccion,
+        lat: reclamo.lat,
+        lng: reclamo.lng,
+        categoria: reclamo.categoria,
+        prioridad: reclamo.prioridad,
+        estado: reclamo.estado,
+      },
+    };
+  }
+
+  async remove(id: string): Promise<{ status: string; message: string; id: string }> {
+    const existing = await this.prisma.reclamo.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
+    }
+
+    await this.prisma.reclamo.delete({ where: { id } });
+
+    return {
+      status: 'deleted',
+      message: 'Reclamo eliminado correctamente',
+      id,
     };
   }
 
@@ -140,5 +289,28 @@ export class ReclamosService {
     }
 
     return typeof target === 'string' && target.includes('codigo');
+  }
+
+  private toResponse(reclamo: Reclamo): ReclamoResponseDto {
+    return {
+      id: reclamo.id,
+      codigoSeguimiento: reclamo.codigoSeguimiento,
+      correlationId: reclamo.correlationId,
+      contactKey: reclamo.contactKey,
+      canal: reclamo.canal as ReclamoResponseDto['canal'],
+      correo: reclamo.correo,
+      dni: reclamo.dni,
+      problema: reclamo.problema,
+      direccion: reclamo.direccion,
+      lat: reclamo.lat,
+      lng: reclamo.lng,
+      categoria: reclamo.categoria as ReclamoResponseDto['categoria'],
+      prioridad: reclamo.prioridad as ReclamoResponseDto['prioridad'],
+      estado: reclamo.estado as ReclamoResponseDto['estado'],
+      observaciones: reclamo.observaciones,
+      creadoEn: reclamo.creadoEn,
+      actualizadoEn: reclamo.actualizadoEn,
+      resolvedAt: reclamo.resolvedAt,
+    };
   }
 }
