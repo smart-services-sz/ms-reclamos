@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ReclamosModule } from './reclamos/reclamos.module';
+import { NatsModule } from './nats/nats.module';
 
 @Module({
   imports: [
@@ -8,6 +9,7 @@ import { ReclamosModule } from './reclamos/reclamos.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    NatsModule,
     ReclamosModule,
   ],
 })

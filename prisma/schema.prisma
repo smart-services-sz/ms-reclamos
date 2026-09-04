@@ -66,6 +66,8 @@ model Reclamo {
   lng           Float
   categoria     ReclamoCategoria
   prioridad     ReclamoPrioridad
+  municipalityId String?          @map("municipality_id")
+  areaId        String?           @map("area_id")
   estado        ReclamoEstado    @default(pendiente)
   observaciones String?
   metadata      Json?
@@ -74,13 +76,95 @@ model Reclamo {
   resolvedAt    DateTime?        @map("resolved_at")
 
   mensajes      MensajeHistorial[]
+  historial     HistorialAccion[]
+  revisiones    RevisionResolucion[]
+  nuevasVisitas NuevaVisita[]
+  respuestasCiudadanas RespuestaCiudadana[]
+  reaperturas   Reapertura[]
 
   @@index([contactKey])
   @@index([estado])
   @@index([categoria])
   @@index([prioridad])
+  @@index([municipalityId, areaId])
   @@index([creadoEn])
   @@map("reclamos")
+}
+
+model HistorialAccion {
+  id             String   @id @default(uuid())
+  reclamoId      String   @map("reclamo_id")
+  accion         String
+  origen         String
+  actorId        String?  @map("actor_id")
+  estadoAnterior ReclamoEstado? @map("estado_anterior")
+  estadoNuevo    ReclamoEstado? @map("estado_nuevo")
+  motivo         String?
+  referenciaId   String?  @map("referencia_id")
+  metadata       Json?
+  creadoEn       DateTime @default(now()) @map("creado_en")
+
+  reclamo Reclamo @relation(fields: [reclamoId], references: [id], onDelete: Cascade)
+
+  @@index([reclamoId, creadoEn])
+  @@index([origen, referenciaId])
+  @@map("historial_acciones")
+}
+
+model RevisionResolucion {
+  id           String   @id @default(uuid())
+  reclamoId    String   @map("reclamo_id")
+  resultado    String
+  actorId      String?  @map("actor_id")
+  comentario   String?
+  creadaEn     DateTime @default(now()) @map("creada_en")
+
+  reclamo Reclamo @relation(fields: [reclamoId], references: [id], onDelete: Cascade)
+
+  @@index([reclamoId, creadaEn])
+  @@map("revisiones_resolucion")
+}
+
+model NuevaVisita {
+  id           String    @id @default(uuid())
+  reclamoId    String    @map("reclamo_id")
+  actorId      String?   @map("actor_id")
+  motivo       String
+  programadaEn DateTime? @map("programada_en")
+  estado       String    @default("solicitada")
+  creadaEn     DateTime  @default(now()) @map("creada_en")
+
+  reclamo Reclamo @relation(fields: [reclamoId], references: [id], onDelete: Cascade)
+
+  @@index([reclamoId, creadaEn])
+  @@map("nuevas_visitas")
+}
+
+model RespuestaCiudadana {
+  id          String   @id @default(uuid())
+  reclamoId   String   @map("reclamo_id")
+  tipo        String
+  comentario  String?
+  contactKey  String?  @map("contact_key")
+  creadaEn    DateTime @default(now()) @map("creada_en")
+
+  reclamo Reclamo @relation(fields: [reclamoId], references: [id], onDelete: Cascade)
+
+  @@index([reclamoId, creadaEn])
+  @@map("respuestas_ciudadanas")
+}
+
+model Reapertura {
+  id        String   @id @default(uuid())
+  reclamoId String   @map("reclamo_id")
+  actorId   String?  @map("actor_id")
+  motivo    String
+  creadaEn  DateTime @default(now()) @map("creada_en")
+
+  reclamo Reclamo @relation(fields: [reclamoId], references: [id], onDelete: Cascade)
+
+  @@index([reclamoId, creadaEn])
+  @@map("reaperturas")
 }
 
 model MensajeHistorial {

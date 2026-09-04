@@ -4,6 +4,7 @@ import {
   IsIn,
   IsLatitude,
   IsLongitude,
+  Matches,
   IsNotEmpty,
   IsObject,
   IsOptional,
@@ -49,9 +50,12 @@ export class CreateReclamoDto {
   contactKey!: string;
 
   /** Canal de origen del reclamo */
-  @IsIn(['whatsapp', 'web', 'email', 'instagram', 'facebook', 'manual', 'other'], {
-    message: 'canal no valido',
-  })
+  @IsIn(
+    ['whatsapp', 'web', 'email', 'instagram', 'facebook', 'manual', 'other'],
+    {
+      message: 'canal no valido',
+    },
+  )
   canal!: ClaimCanal;
 
   /** Correo electrónico del usuario (opcional) */
@@ -87,14 +91,37 @@ export class CreateReclamoDto {
 
   /** Categoría del reclamo asignada por IA */
   @IsIn(
-    ['agua_y_cloacas', 'alumbrado', 'baches_y_pavimento', 'arbolado', 'residuos', 'electricidad', 'gas', 'transporte', 'infraestructura', 'otros'],
+    [
+      'agua_y_cloacas',
+      'alumbrado',
+      'baches_y_pavimento',
+      'arbolado',
+      'residuos',
+      'electricidad',
+      'gas',
+      'transporte',
+      'infraestructura',
+      'otros',
+    ],
     { message: 'categoria no valida' },
   )
   categoria!: ClaimCategoria;
 
   /** Prioridad del reclamo asignada por IA */
-  @IsIn(['alta', 'media', 'baja'], { message: 'prioridad debe ser alta, media o baja' })
+  @IsIn(['alta', 'media', 'baja'], {
+    message: 'prioridad debe ser alta, media o baja',
+  })
   prioridad!: ClaimPrioridad;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+  municipalityId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+  areaId?: string;
 
   /** Observaciones adicionales opcionales */
   @IsOptional()
@@ -114,4 +141,3 @@ export class CreateReclamoDto {
   @Type(() => MensajeHistorialDto)
   mensajes?: MensajeHistorialDto[];
 }
-

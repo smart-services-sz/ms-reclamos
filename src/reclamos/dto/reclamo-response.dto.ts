@@ -1,6 +1,15 @@
-import { ClaimCanal, ClaimCategoria, ClaimPrioridad } from './create-reclamo.dto';
+import {
+  ClaimCanal,
+  ClaimCategoria,
+  ClaimPrioridad,
+} from './create-reclamo.dto';
 
-export type ReclamoEstado = 'pendiente' | 'en_proceso' | 'resuelto' | 'rechazado' | 'cerrado';
+export type ReclamoEstado =
+  | 'pendiente'
+  | 'en_proceso'
+  | 'resuelto'
+  | 'rechazado'
+  | 'cerrado';
 
 export class ReclamoResponseDto {
   /** ID único del reclamo en la base de datos (UUID) */
@@ -44,6 +53,10 @@ export class ReclamoResponseDto {
 
   /** Estado actual del reclamo */
   estado!: ReclamoEstado;
+
+  municipalityId?: string | null;
+
+  areaId?: string | null;
 
   /** Observaciones adicionales */
   observaciones?: string | null;

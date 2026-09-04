@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString, Matches } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class FindReclamosDto extends PaginationQueryDto {
@@ -50,6 +50,16 @@ export class FindReclamosDto extends PaginationQueryDto {
     message: 'prioridad no valida',
   })
   prioridad?: 'alta' | 'media' | 'baja';
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+  municipalityId?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[a-z0-9]+(?:_[a-z0-9]+)*$/)
+  areaId?: string;
 
   @IsOptional()
   @Type(() => Number)
