@@ -44,6 +44,11 @@ type PaginatedReclamosResponse = {
   };
 };
 
+type ReclamoTerritorialScope = {
+  municipalityId?: string;
+  areaId?: string;
+};
+
 @Injectable()
 export class ReclamosService {
   private readonly logger = new Logger(ReclamosService.name);
@@ -151,9 +156,12 @@ export class ReclamosService {
     };
   }
 
-  async findOne(id: string): Promise<ReclamoCrudResponse> {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { id },
+  async findOne(
+    id: string,
+    scope: ReclamoTerritorialScope = {},
+  ): Promise<ReclamoCrudResponse> {
+    const reclamo = await this.prisma.reclamo.findFirst({
+      where: { id, ...this.territorialScopeWhere(scope) },
     });
 
     if (!reclamo) {
@@ -178,9 +186,9 @@ export class ReclamosService {
     };
   }
 
-  async getHistory(id: string) {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { id },
+  async getHistory(id: string, scope: ReclamoTerritorialScope = {}) {
+    const reclamo = await this.prisma.reclamo.findFirst({
+      where: { id, ...this.territorialScopeWhere(scope) },
       select: { id: true },
     });
 
@@ -198,13 +206,24 @@ export class ReclamosService {
   }
 
   async publicTracking(payload: PublicTrackingDto) {
+    const contacto = payload.contacto.trim();
+    const isEmail = contacto.includes('@');
+    const normalizedContact = isEmail
+      ? contacto.toLowerCase()
+      : contacto.replace(/\D/g, '');
+    const contactMatches: Prisma.ReclamoWhereInput[] = isEmail
+      ? [
+          { correo: normalizedContact },
+          { contactKey: { endsWith: `:${normalizedContact}` } },
+        ]
+      : [{ contactKey: { endsWith: `:${normalizedContact}` } }];
+
     const reclamo = await this.prisma.reclamo.findFirst({
       where: {
         codigoSeguimiento: payload.codigoSeguimiento,
-        contactKey: payload.contactKey,
+        OR: contactMatches,
       },
       select: {
-        id: true,
         codigoSeguimiento: true,
         estado: true,
         categoria: true,
@@ -220,7 +239,6 @@ export class ReclamosService {
       status: 'ok' as const,
       data: {
         trackingCode: reclamo.codigoSeguimiento,
-        claimId: reclamo.id,
         status: reclamo.estado,
         category: reclamo.categoria,
         updatedAt: reclamo.actualizadoEn.toISOString(),
@@ -229,12 +247,20 @@ export class ReclamosService {
   }
 
   async citizenResponse(payload: CitizenResponseDto) {
+    if (!payload.reclamoId && !payload.trackingCode) {
+      return { status: 'not_found', data: null };
+    }
     const reclamo = await this.prisma.reclamo.findFirst({
-      where: { id: payload.reclamoId, contactKey: payload.contactKey },
+      where: {
+        contactKey: payload.contactKey,
+        ...(payload.reclamoId
+          ? { id: payload.reclamoId }
+          : { codigoSeguimiento: payload.trackingCode }),
+      },
     });
     if (!reclamo) return { status: 'not_found', data: null };
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const response = await tx.respuestaCiudadana.create({
         data: {
           reclamoId: reclamo.id,
@@ -259,17 +285,21 @@ export class ReclamosService {
           metadata: { tipo: payload.tipo },
         },
       });
-      return { status: 'ok', data: response };
+      return { response, reclamo: updated };
     });
+    if (result.reclamo.estado !== reclamo.estado) {
+      await this.publishStatusChanged(result.reclamo, undefined, ['CITIZEN']);
+    }
+    return { status: 'ok', data: result.response };
   }
 
-  async reopen(payload: ReopenReclamoDto) {
+  async reopen(payload: ReopenReclamoDto, actorRoles: string[] = []) {
     const reclamo = await this.prisma.reclamo.findUnique({
       where: { id: payload.reclamoId },
     });
     if (!reclamo) throw new NotFoundException('Reclamo no encontrado');
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const reopening = await tx.reapertura.create({
         data: {
           reclamoId: reclamo.id,
@@ -293,8 +323,16 @@ export class ReclamosService {
           referenciaId: reopening.id,
         },
       });
-      return { status: 'ok', data: reopening };
+      return { reopening, reclamo: updated };
     });
+    if (result.reclamo.estado !== reclamo.estado) {
+      await this.publishStatusChanged(
+        result.reclamo,
+        payload.actorId,
+        actorRoles,
+      );
+    }
+    return { status: 'ok', data: result.reopening };
   }
 
   async citizenReopen(payload: CitizenReopenDto) {
@@ -310,49 +348,13 @@ export class ReclamosService {
       reclamoId: reclamo.id,
       actorId: undefined,
       motivo: payload.motivo,
-    });
-  }
-
-  async getPublicTracking(codigoSeguimiento: string) {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { codigoSeguimiento },
-      select: {
-        codigoSeguimiento: true,
-        estado: true,
-        categoria: true,
-        creadoEn: true,
-        actualizadoEn: true,
-      },
-    });
-
-    if (!reclamo) {
-      throw new NotFoundException('No se encontró un reclamo con ese código');
-    }
-
-    return {
-      status: 'ok',
-      data: {
-        trackingCode: reclamo.codigoSeguimiento,
-        status: reclamo.estado,
-        category: reclamo.categoria,
-        createdAt: reclamo.creadoEn.toISOString(),
-        updatedAt: reclamo.actualizadoEn.toISOString(),
-      },
-    };
+    }, ['CITIZEN']);
   }
 
   async reviewResolution(payload: ReviewResolutionDto) {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { id: payload.reclamoId },
-    });
+    const reclamo = await this.findScopedReclamo(payload.reclamoId, payload);
 
-    if (!reclamo) {
-      throw new NotFoundException(
-        `No se encontró reclamo con id=${payload.reclamoId}`,
-      );
-    }
-
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const review = await tx.revisionResolucion.create({
         data: {
           reclamoId: payload.reclamoId,
@@ -381,22 +383,18 @@ export class ReclamosService {
         },
       });
 
-      return { status: 'ok', data: review };
+      return { review, reclamo: updated };
     });
+    if (result.reclamo.estado !== reclamo.estado) {
+      await this.publishStatusChanged(result.reclamo, payload.actorId);
+    }
+    return { status: 'ok', data: result.review };
   }
 
   async requestNewVisit(payload: RequestNewVisitDto) {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { id: payload.reclamoId },
-    });
+    const reclamo = await this.findScopedReclamo(payload.reclamoId, payload);
 
-    if (!reclamo) {
-      throw new NotFoundException(
-        `No se encontró reclamo con id=${payload.reclamoId}`,
-      );
-    }
-
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const visit = await tx.nuevaVisita.create({
         data: {
           reclamoId: payload.reclamoId,
@@ -426,20 +424,16 @@ export class ReclamosService {
         },
       });
 
-      return { status: 'ok', data: visit };
+      return { visit, reclamo: updated };
     });
+    if (result.reclamo.estado !== reclamo.estado) {
+      await this.publishStatusChanged(result.reclamo, payload.actorId);
+    }
+    return { status: 'ok', data: result.visit };
   }
 
   async close(payload: CloseReclamoDto) {
-    const reclamo = await this.prisma.reclamo.findUnique({
-      where: { id: payload.reclamoId },
-    });
-
-    if (!reclamo) {
-      throw new NotFoundException(
-        `No se encontró reclamo con id=${payload.reclamoId}`,
-      );
-    }
+    const reclamo = await this.findScopedReclamo(payload.reclamoId, payload);
 
     const latestReview = await this.prisma.revisionResolucion.findFirst({
       where: { reclamoId: payload.reclamoId },
@@ -453,7 +447,7 @@ export class ReclamosService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const updated = await this.prisma.$transaction(async (tx) => {
       const updated = await tx.reclamo.update({
         where: { id: payload.reclamoId },
         data: { estado: 'cerrado' },
@@ -472,19 +466,20 @@ export class ReclamosService {
         },
       });
 
-      return { status: 'ok', data: updated };
+      return updated;
     });
+    if (updated.estado !== reclamo.estado) {
+      await this.publishStatusChanged(updated, payload.actorId);
+    }
+    return { status: 'ok', data: updated };
   }
 
   async update(
     id: string,
     data: UpdateReclamoDto,
+    scope: ReclamoTerritorialScope = {},
   ): Promise<ReclamoCrudResponse> {
-    const existing = await this.prisma.reclamo.findUnique({ where: { id } });
-
-    if (!existing) {
-      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
-    }
+    const existing = await this.findScopedReclamo(id, scope);
 
     let resolvedAt: Date | null | undefined;
     if (data.estado === 'resuelto') {
@@ -552,12 +547,9 @@ export class ReclamosService {
 
   async remove(
     id: string,
+    scope: ReclamoTerritorialScope = {},
   ): Promise<{ status: string; message: string; id: string }> {
-    const existing = await this.prisma.reclamo.findUnique({ where: { id } });
-
-    if (!existing) {
-      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
-    }
+    await this.findScopedReclamo(id, scope);
 
     await this.prisma.reclamo.delete({ where: { id } });
 
@@ -631,9 +623,32 @@ export class ReclamosService {
     throw new Error('No se pudo generar un codigo de seguimiento unico');
   }
 
+  private async findScopedReclamo(
+    id: string,
+    scope: ReclamoTerritorialScope,
+  ): Promise<Reclamo> {
+    const reclamo = await this.prisma.reclamo.findFirst({
+      where: { id, ...this.territorialScopeWhere(scope) },
+    });
+    if (!reclamo) {
+      throw new NotFoundException(`No se encontró reclamo con id=${id}`);
+    }
+    return reclamo;
+  }
+
+  private territorialScopeWhere(
+    scope: ReclamoTerritorialScope,
+  ): Prisma.ReclamoWhereInput {
+    return {
+      municipalityId: scope.municipalityId || undefined,
+      areaId: scope.areaId || undefined,
+    };
+  }
+
   private async publishStatusChanged(
     reclamo: Reclamo,
     actorId?: string,
+    actorRoles: string[] = [],
   ): Promise<void> {
     const event: ClaimStatusChangedEvent = {
       version: '1',
@@ -641,16 +656,16 @@ export class ReclamosService {
       idempotencyKey: `${reclamo.id}:${reclamo.actualizadoEn.toISOString()}:${reclamo.estado}`,
       occurredAt: reclamo.actualizadoEn.toISOString(),
       producer: 'ms-reclamos',
-      actor: actorId ? { id: actorId } : {},
+      actor: {
+        ...(actorId ? { id: actorId } : {}),
+        ...(actorRoles.length ? { roles: actorRoles } : {}),
+      },
       municipalityId: reclamo.municipalityId ?? undefined,
       claimId: reclamo.id,
       trackingCode: reclamo.codigoSeguimiento,
       newStatus: reclamo.estado,
       recipientEmail: reclamo.correo ?? undefined,
-      recipientPhone:
-        reclamo.canal === 'whatsapp'
-          ? this.extractWhatsappRecipient(reclamo.contactKey)
-          : undefined,
+      recipientPhone: this.extractContactPhone(reclamo.contactKey),
     };
 
     try {
@@ -666,9 +681,14 @@ export class ReclamosService {
     }
   }
 
-  private extractWhatsappRecipient(contactKey: string): string | undefined {
-    const [channel, recipient] = contactKey.split(':', 2);
-    return channel === 'whatsapp' && recipient ? recipient : undefined;
+  private extractContactPhone(contactKey: string): string | undefined {
+    const [channel, identityType, ...identityParts] = contactKey.split(':');
+    const phone = identityParts.join(':');
+    return ['whatsapp', 'web'].includes(channel) &&
+      identityType === 'phone' &&
+      phone
+      ? phone
+      : undefined;
   }
 
   private generateTrackingCode(): string {

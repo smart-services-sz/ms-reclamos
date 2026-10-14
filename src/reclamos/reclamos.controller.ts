@@ -44,7 +44,7 @@ export class ReclamosController {
   @MessagePattern('reclamos.find-one')
   async findOne(@Payload() payload: ReclamoIdDto) {
     this.logger.log(`Tópico reclamos.find-one recibido | id=${payload.id}`);
-    return this.reclamosService.findOne(payload.id);
+    return this.reclamosService.findOne(payload.id, payload);
   }
 
   @MessagePattern('reclamos.public-tracking')
@@ -70,7 +70,7 @@ export class ReclamosController {
   @MessagePattern('reclamos.history')
   async history(@Payload() payload: ReclamoIdDto) {
     this.logger.log(`Tópico reclamos.history recibido | id=${payload.id}`);
-    return this.reclamosService.getHistory(payload.id);
+    return this.reclamosService.getHistory(payload.id, payload);
   }
 
   @MessagePattern('reclamos.resolution.review')
@@ -97,6 +97,6 @@ export class ReclamosController {
   @MessagePattern('reclamos.remove')
   async remove(@Payload() payload: ReclamoIdDto) {
     this.logger.log(`Tópico reclamos.remove recibido | id=${payload.id}`);
-    return this.reclamosService.remove(payload.id);
+    return this.reclamosService.remove(payload.id, payload);
   }
 }

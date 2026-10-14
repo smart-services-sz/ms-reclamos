@@ -10,6 +10,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TerritorialScopeDto } from '../../common/dto/territorial-scope.dto';
 
 export class UpdateReclamoDto {
   @IsOptional()
@@ -92,7 +93,7 @@ export class UpdateReclamoDto {
   referenciaId?: string;
 }
 
-export class UpdateReclamoCommandDto {
+export class UpdateReclamoCommandDto extends TerritorialScopeDto {
   @IsString()
   @IsUUID('4', { message: 'id debe ser un UUID v4 valido' })
   id!: string;

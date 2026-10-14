@@ -5,8 +5,9 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import { TerritorialScopeDto } from '../../common/dto/territorial-scope.dto';
 
-export class RequestNewVisitDto {
+export class RequestNewVisitDto extends TerritorialScopeDto {
   @IsUUID('4')
   reclamoId!: string;
 
