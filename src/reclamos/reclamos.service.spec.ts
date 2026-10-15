@@ -49,6 +49,72 @@ describe('ReclamosService territorial scope', () => {
     });
   });
 
+  it('returns only validated possible-duplicate suggestions from metadata', async () => {
+    prisma.reclamo.findMany.mockResolvedValue([
+      {
+        id: 'claim-new',
+        codigoSeguimiento: 'REC-NEW123',
+        correlationId: 'correlation-new',
+        contactKey: 'whatsapp:phone:5493415551234',
+        canal: 'whatsapp',
+        correo: null,
+        dni: null,
+        problema: 'Luminaria apagada',
+        direccion: 'San Martin 123, Funes',
+        lat: -32.91,
+        lng: -60.81,
+        categoria: 'alumbrado',
+        prioridad: 'media',
+        municipalityId,
+        areaId,
+        estado: 'pendiente',
+        observaciones: null,
+        metadata: {
+          posiblesDuplicados: [
+            {
+              reclamoId: 'claim-old',
+              codigoSeguimiento: 'REC-OLD123',
+              problema: 'Luz apagada',
+              direccion: 'San Martin 123',
+              estado: 'en_proceso',
+              distanciaMetros: 12,
+              similitud: 87,
+              contactKey: 'private-value-must-not-be-returned',
+            },
+            { codigoSeguimiento: 'invalid-candidate' },
+          ],
+          source: 'whatsapp',
+        },
+        creadoEn: new Date('2026-10-15T10:00:00.000Z'),
+        actualizadoEn: new Date('2026-10-15T10:00:00.000Z'),
+        resolvedAt: null,
+      },
+    ] as never);
+
+    const response = await service.findAll({
+      page: 1,
+      limit: 10,
+      skip: 0,
+      municipalityId,
+      areaId,
+    } as never);
+
+    expect(response.items[0].posiblesDuplicados).toEqual([
+      {
+        reclamoId: 'claim-old',
+        codigoSeguimiento: 'REC-OLD123',
+        problema: 'Luz apagada',
+        direccion: 'San Martin 123',
+        estado: 'en_proceso',
+        distanciaMetros: 12,
+        similitud: 87,
+      },
+    ]);
+    expect(JSON.stringify(response.items[0].posiblesDuplicados)).not.toContain(
+      'private-value',
+    );
+  });
+
   it('treats a claim outside the tenant scope as not found', async () => {
     await expect(
       service.findOne('claim-id', { municipalityId, areaId }),

@@ -11,7 +11,10 @@ import { Prisma, Reclamo } from '@prisma/client';
 import { firstValueFrom, timeout } from 'rxjs';
 import { CreateReclamoDto } from './dto/create-reclamo.dto';
 import { PrismaService } from '../prisma/prisma.service';
-import { ReclamoResponseDto } from './dto/reclamo-response.dto';
+import {
+  PosibleDuplicado,
+  ReclamoResponseDto,
+} from './dto/reclamo-response.dto';
 import { FindReclamosDto } from './dto/find-reclamos.dto';
 import { UpdateReclamoDto } from './dto/update-reclamo.dto';
 import { ReviewResolutionDto } from './dto/review-resolution.dto';
@@ -739,6 +742,46 @@ export class ReclamosService {
       creadoEn: reclamo.creadoEn,
       actualizadoEn: reclamo.actualizadoEn,
       resolvedAt: reclamo.resolvedAt,
+      posiblesDuplicados: this.readPossibleDuplicates(reclamo.metadata),
     };
+  }
+
+  private readPossibleDuplicates(
+    metadata: Prisma.JsonValue | null,
+  ): PosibleDuplicado[] | undefined {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return undefined;
+    }
+    const rawCandidates = (metadata as Prisma.JsonObject).posiblesDuplicados;
+    if (!Array.isArray(rawCandidates)) return undefined;
+
+    return rawCandidates.flatMap((candidate) => {
+      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+        return [];
+      }
+      const value = candidate as Prisma.JsonObject;
+      if (
+        typeof value.reclamoId !== 'string' ||
+        typeof value.codigoSeguimiento !== 'string' ||
+        typeof value.problema !== 'string' ||
+        typeof value.direccion !== 'string' ||
+        typeof value.estado !== 'string' ||
+        typeof value.distanciaMetros !== 'number' ||
+        typeof value.similitud !== 'number'
+      ) {
+        return [];
+      }
+      return [
+        {
+          reclamoId: value.reclamoId,
+          codigoSeguimiento: value.codigoSeguimiento,
+          problema: value.problema,
+          direccion: value.direccion,
+          estado: value.estado,
+          distanciaMetros: value.distanciaMetros,
+          similitud: value.similitud,
+        },
+      ];
+    });
   }
 }

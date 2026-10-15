@@ -11,6 +11,16 @@ export type ReclamoEstado =
   | 'rechazado'
   | 'cerrado';
 
+export type PosibleDuplicado = {
+  reclamoId: string;
+  codigoSeguimiento: string;
+  problema: string;
+  direccion: string;
+  estado: string;
+  distanciaMetros: number;
+  similitud: number;
+};
+
 export class ReclamoResponseDto {
   /** ID único del reclamo en la base de datos (UUID) */
   id!: string;
@@ -69,4 +79,6 @@ export class ReclamoResponseDto {
 
   /** Fecha de resolución si fue resuelto */
   resolvedAt?: Date | null;
+
+  posiblesDuplicados?: PosibleDuplicado[];
 }
