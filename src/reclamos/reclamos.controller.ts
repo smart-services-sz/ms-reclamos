@@ -91,7 +91,7 @@ export class ReclamosController {
   @MessagePattern('reclamos.update')
   async update(@Payload() payload: UpdateReclamoCommandDto) {
     this.logger.log(`Tópico reclamos.update recibido | id=${payload.id}`);
-    return this.reclamosService.update(payload.id, payload.data);
+    return this.reclamosService.update(payload.id, payload.data, payload);
   }
 
   @MessagePattern('reclamos.remove')

@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReclamosService } from './reclamos.service';
+import { ReclamosController } from './reclamos.controller';
 
 describe('ReclamosService territorial scope', () => {
   const municipalityId = 'municipality-a';
@@ -47,6 +48,14 @@ describe('ReclamosService territorial scope', () => {
     expect(prisma.reclamo.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ municipalityId, areaId }),
     });
+  });
+
+  it('preserves the territorial scope when consuming an update from routing', async () => {
+    const update = jest.fn().mockResolvedValue({ status: 'updated' });
+    const controller = new ReclamosController({ update } as unknown as ReclamosService);
+    const payload = { id: 'claim-id', data: { estado: 'resuelto' as const }, municipalityId, areaId };
+    await controller.update(payload);
+    expect(update).toHaveBeenCalledWith(payload.id, payload.data, payload);
   });
 
   it('returns only validated possible-duplicate suggestions from metadata', async () => {
