@@ -66,7 +66,7 @@ export class ReclamosService {
   // única transacción atómica. Si falla cualquier INSERT, Prisma hace rollback automático.
   async create(payload: CreateReclamoDto): Promise<ReclamoCrudResponse> {
     this.logger.log(
-      `[${payload.correlationId}] Persistiendo reclamo | contactKey=${payload.contactKey} | categoria=${payload.categoria} | prioridad=${payload.prioridad}`,
+      `[${payload.correlationId}] Persistiendo reclamo | canal=${payload.canal} | categoria=${payload.categoria} | prioridad=${payload.prioridad} | municipalityId=${payload.municipalityId ?? 'unassigned'}`,
     );
 
     // Convierte el array de mensajes del DTO al formato de Prisma nested create.

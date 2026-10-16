@@ -6,6 +6,7 @@ import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 
 async function bootstrap() {
   const logger = new Logger('MS-RECLAMOS');
+  const natsConfigured = Boolean(process.env.NATS_SERVERS);
 
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     AppModule,
@@ -31,7 +32,7 @@ async function bootstrap() {
   ----------------------------------------
     MS-RECLAMOS STARTED
     ENV : ${process.env.NODE_ENV}
-    NATS_SERVERS: ${process.env.NATS_SERVERS}
+    NATS: ${natsConfigured ? 'configured' : 'default'}
   ----------------------------------------
   `);
 }
