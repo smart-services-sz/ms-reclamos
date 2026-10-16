@@ -12,6 +12,7 @@ import { PublicTrackingDto } from './dto/public-tracking.dto';
 import { CitizenResponseDto } from './dto/citizen-response.dto';
 import { ReopenReclamoDto } from './dto/reopen-reclamo.dto';
 import { CitizenReopenDto } from './dto/citizen-reopen.dto';
+import { ReclamoMetricsDto } from './dto/reclamo-metrics.dto';
 
 @Controller()
 export class ReclamosController {
@@ -36,6 +37,11 @@ export class ReclamosController {
       `Tópico reclamos.find-all recibido | page=${payload.page} | limit=${payload.limit}`,
     );
     return this.reclamosService.findAll(payload);
+  }
+
+  @MessagePattern('reclamos.metrics.summary')
+  metricsSummary(@Payload() payload: ReclamoMetricsDto) {
+    return this.reclamosService.getMetrics(payload);
   }
 
   @MessagePattern('reclamos.find-one')

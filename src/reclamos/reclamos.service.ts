@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   HttpException,
   HttpStatus,
   Inject,
@@ -24,6 +25,7 @@ import { PublicTrackingDto } from './dto/public-tracking.dto';
 import { CitizenResponseDto } from './dto/citizen-response.dto';
 import { ReopenReclamoDto } from './dto/reopen-reclamo.dto';
 import { CitizenReopenDto } from './dto/citizen-reopen.dto';
+import { ReclamoMetricsDto } from './dto/reclamo-metrics.dto';
 import { ClaimStatusChangedEvent } from './events/claim-status-changed.event';
 
 type ReclamoCrudResponse = ReclamoResponseDto & {
@@ -157,6 +159,112 @@ export class ReclamosService {
         hasPreviousPage: payload.page > 1,
       },
     };
+  }
+
+  async getMetrics(filters: ReclamoMetricsDto) {
+    const municipalityId = filters.municipalityId;
+    if (!municipalityId) {
+      throw new BadRequestException('municipalityId es obligatorio para consultar métricas');
+    }
+
+    const now = new Date();
+    const to = filters.to ? this.startOfNextUtcDay(filters.to) : this.startOfNextUtcDay(now.toISOString().slice(0, 10));
+    const from = filters.from
+      ? new Date(`${filters.from.slice(0, 10)}T00:00:00.000Z`)
+      : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from >= to) {
+      throw new BadRequestException('El rango de fechas de métricas no es válido');
+    }
+    const rangeMs = to.getTime() - from.getTime();
+    if (rangeMs > 366 * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('El rango máximo de métricas es de 366 días');
+    }
+
+    const where: Prisma.ReclamoWhereInput = {
+      municipalityId,
+      creadoEn: { gte: from, lt: to },
+      ...(filters.areaId ? { areaId: filters.areaId } : {}),
+      ...(filters.estado ? { estado: filters.estado } : {}),
+      ...(filters.categoria ? { categoria: filters.categoria as never } : {}),
+      ...(filters.prioridad ? { prioridad: filters.prioridad } : {}),
+      ...(filters.canal ? { canal: filters.canal as never } : {}),
+    };
+    const previousWhere: Prisma.ReclamoWhereInput = {
+      ...where,
+      creadoEn: { gte: new Date(from.getTime() - rangeMs), lt: from },
+    };
+    const bucketDays = filters.bucketDays ?? 1;
+    const bucket = bucketDays === 30 ? 'month' : bucketDays === 7 ? 'week' : 'day';
+    const sqlFilters: Prisma.Sql[] = [
+      Prisma.sql`"municipality_id" = ${municipalityId}`,
+      Prisma.sql`"creado_en" >= ${from}`,
+      Prisma.sql`"creado_en" < ${to}`,
+    ];
+    if (filters.areaId) sqlFilters.push(Prisma.sql`"area_id" = ${filters.areaId}`);
+    if (filters.estado) sqlFilters.push(Prisma.sql`"estado"::text = ${filters.estado}`);
+    if (filters.categoria) sqlFilters.push(Prisma.sql`"categoria"::text = ${filters.categoria}`);
+    if (filters.prioridad) sqlFilters.push(Prisma.sql`"prioridad"::text = ${filters.prioridad}`);
+    if (filters.canal) sqlFilters.push(Prisma.sql`"canal"::text = ${filters.canal}`);
+    const sqlWhere = Prisma.join(sqlFilters, ' AND ');
+
+    const [total, previousTotal, byStatus, byCategory, byPriority, byChannel, byArea, timeline, resolution] = await Promise.all([
+      this.prisma.reclamo.count({ where }),
+      this.prisma.reclamo.count({ where: previousWhere }),
+      this.prisma.reclamo.groupBy({ by: ['estado'], where, _count: { _all: true } }),
+      this.prisma.reclamo.groupBy({ by: ['categoria'], where, _count: { _all: true } }),
+      this.prisma.reclamo.groupBy({ by: ['prioridad'], where, _count: { _all: true } }),
+      this.prisma.reclamo.groupBy({ by: ['canal'], where, _count: { _all: true } }),
+      this.prisma.reclamo.groupBy({ by: ['areaId'], where, _count: { _all: true } }),
+      this.prisma.$queryRaw<Array<{ period: Date; total: number }>>(Prisma.sql`
+        SELECT date_trunc(${bucket}, "creado_en") AS period, COUNT(*)::int AS total
+        FROM "reclamos"
+        WHERE ${sqlWhere}
+        GROUP BY period
+        ORDER BY period ASC
+      `),
+      this.prisma.$queryRaw<Array<{ averageHours: number | null; medianHours: number | null }>>(Prisma.sql`
+        SELECT
+          AVG(EXTRACT(EPOCH FROM ("resolved_at" - "creado_en")) / 3600)::float AS "averageHours",
+          percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("resolved_at" - "creado_en")) / 3600)::float AS "medianHours"
+        FROM "reclamos"
+        WHERE ${sqlWhere} AND "resolved_at" IS NOT NULL AND "resolved_at" >= "creado_en"
+      `),
+    ]);
+
+    const statusCounts = Object.fromEntries(byStatus.map((item) => [item.estado, item._count._all]));
+    const open = (statusCounts.pendiente ?? 0) + (statusCounts.en_proceso ?? 0);
+    const previousChangePercent = previousTotal === 0
+      ? (total === 0 ? 0 : null)
+      : Math.round(((total - previousTotal) / previousTotal) * 1000) / 10;
+
+    return {
+      municipalityId,
+      range: { from: from.toISOString(), to: new Date(to.getTime() - 1).toISOString(), bucketDays },
+      summary: {
+        total,
+        previousTotal,
+        changePercent: previousChangePercent,
+        open,
+        resolved: statusCounts.resuelto ?? 0,
+        closed: statusCounts.cerrado ?? 0,
+        rejected: statusCounts.rechazado ?? 0,
+        resolutionRate: total ? Math.round(((statusCounts.resuelto ?? 0) / total) * 1000) / 10 : 0,
+        averageResolutionHours: resolution[0]?.averageHours ?? null,
+        medianResolutionHours: resolution[0]?.medianHours ?? null,
+      },
+      byStatus: byStatus.map((item) => ({ name: item.estado, total: item._count._all })),
+      byCategory: byCategory.map((item) => ({ name: item.categoria, total: item._count._all })),
+      byPriority: byPriority.map((item) => ({ name: item.prioridad, total: item._count._all })),
+      byChannel: byChannel.map((item) => ({ name: item.canal, total: item._count._all })),
+      byArea: byArea.map((item) => ({ name: item.areaId ?? 'sin_area', total: item._count._all })),
+      timeline: timeline.map((item) => ({ period: item.period.toISOString(), total: item.total })),
+    };
+  }
+
+  private startOfNextUtcDay(value: string): Date {
+    const day = new Date(`${value.slice(0, 10)}T00:00:00.000Z`);
+    day.setUTCDate(day.getUTCDate() + 1);
+    return day;
   }
 
   async findOne(
